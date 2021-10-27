@@ -3,19 +3,17 @@
 // ****************************************************************************
 namespace PIPE_FLOW_FIELD_RENDER
 {
-	float mesh_scale = 0.5f;
-	int border_deta = 1;
+	float unit_scale = 2.0f;
+	float border_deta = 1;
 
-	struct center_t
-	{
-		vec3 p;
-		float r;
-	};
+	struct center_t{vec3 p;float r;};
 	using CENTERLIST = std::vector<center_t>;
 	std::vector<CENTERLIST> centerlinestack;
+
 	boundingboxi aabb;
-	vec3 cur_centerpoint;
+	vec3 cur_center1, cur_center2;
 	real cur_radius = 0;
+
 	// -----------------------------------------------
 	inline real field2tris(submesh& sm, int i, int j, int k, real scale, std::function<real(vec3& p)> field)
 	{
@@ -44,20 +42,48 @@ namespace PIPE_FLOW_FIELD_RENDER
 
 		gsearchcomvertex = true;
 		gcommonvertex = true;
-		for (int i = 0; i < num; i++)
+
+		if (cur_center1 == cur_center2)
 		{
-			vertex v1, v2, v3;
-			v1.p = tri[i].p[0] * scale;
-			v2.p = tri[i].p[1] * scale;
-			v3.p = tri[i].p[2] * scale;
+			for (int i = 0; i < num; i++)
+			{
+				vertex v1, v2, v3;
+				v1.p = tri[i].p[0] * scale;
+				v2.p = tri[i].p[1] * scale;
+				v3.p = tri[i].p[2] * scale;
 
-			v1.n = (v1.p - cur_centerpoint).normcopy();
-			v2.n = (v2.p - cur_centerpoint).normcopy();
-			v3.n = (v3.p - cur_centerpoint).normcopy();
+				v1.n = (v1.p - cur_center1).normcopy();
+				v2.n = (v2.p - cur_center1).normcopy();
+				v3.n = (v3.p - cur_center1).normcopy();
 
-			binvnorm = 1;
-			//bautonorm = false;
-			triang(v1, v2, v3);
+				binvnorm = 1;
+				triang(v1, v2, v3);
+			}
+		}
+		else
+		{
+			vec3 vc12 = cur_center2 - cur_center1; vc12.norm();
+			for (int i = 0; i < num; i++)
+			{
+				vertex v1, v2, v3;
+				v1.p = tri[i].p[0] * scale;
+				v2.p = tri[i].p[1] * scale;
+				v3.p = tri[i].p[2] * scale;
+
+				{
+					v1.n = (v1.p - cur_center1);
+					v1.n = v1.n - vc12 * v1.n.dot(vc12); v1.n.norm();
+
+					v2.n = (v2.p - cur_center1);
+					v2.n = v2.n - vc12 * v2.n.dot(vc12); v2.n.norm();
+
+					v3.n = (v3.p - cur_center1);
+					v3.n = v3.n - vc12 * v3.n.dot(vc12); v3.n.norm();
+				}
+
+				binvnorm = 1;
+				triang(v1, v2, v3);
+			}
 		}
 		return grid.val[0];
 	}
@@ -86,7 +112,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 
 		if(poly.size() == 1)
 		{
-			real ddis = (p - poly[0].p).sqrlen();
+			real ddis = (p - poly[0].p).sqrlen() / (poly[0].r * poly[0].r);
 			if (ddis < minddis)
 			{
 				currentpoint = 0;
@@ -107,46 +133,46 @@ namespace PIPE_FLOW_FIELD_RENDER
 					real dot = vp.dot(v12);
 					if (dot > 0 && dot <= d12)
 					{
-						real ddis = (vp - v12 * dot).sqrlen();
+						real radius = blend(poly[i - 1].r, poly[i].r, dot / d12);
+						real ddis = (vp - v12 * dot).sqrlen() / (radius * radius);
 						if (ddis < minddis)
 						{
 							alpha = dot / d12;
 							currentpoint = i;
+							cur_center1 = poly[currentpoint - 1].p;
+							cur_center2 = poly[currentpoint].p;
+							cur_radius = radius;
 							minddis = ddis;
 						}
 					}
 				}
 				{
-					real ddis = (p - p1).sqrlen();
+					real radius = poly[i - 1].r;
+					real ddis = (p - p1).sqrlen() / (radius * radius);
 					if (ddis < minddis)
 					{
+						alpha = 0;
 						currentpoint = i - 1;
+						cur_radius = radius;
+						cur_center1 = cur_center2 = poly[currentpoint].p;
 						minddis = ddis;
 					}
 				}
 				{
-					real ddis = (p - p2).sqrlen();
+					real radius = poly[i].r;
+					real ddis = (p - p2).sqrlen() / (radius * radius);
 					if (ddis < minddis)
 					{
+						alpha = 0;
 						currentpoint = i;
+						cur_radius = radius;
+						cur_center1 = cur_center2 = poly[currentpoint].p;
 						minddis = ddis;
 					}
 				}
 			}
 		}
-		if (currentpoint >= 0)
-		{
-			if (alpha == 0)
-			{
-				cur_centerpoint = poly[currentpoint].p;
-				cur_radius = poly[currentpoint].r;
-			}
-			else
-			{
-				cur_centerpoint = blend(poly[currentpoint - 1].p, poly[currentpoint].p, alpha);
-				cur_radius = blend(poly[currentpoint - 1].r, poly[currentpoint].r, alpha);
-			}
-		}
+
 		return minddis;
 	}
 	// -----------------------------------------------
@@ -156,15 +182,17 @@ namespace PIPE_FLOW_FIELD_RENDER
 			for (int j = aabb.a.y; j < aabb.b.y; j++)
 				for (int k = aabb.a.z; k < aabb.b.z; k++)
 				{
-					field2tris(sm, i, j, k, mesh_scale / 10.0f,
+					field2tris(sm, i, j, k, unit_scale / 5.0f,
 						[i, j, k](crvec p)->float
 						{
-							float dd = 1e5;
+							float mdd = 1e10;
 							for (auto& it : centerlinestack)
 							{
-								dd = getdis_onpoly(it, p, dd);
+								float dd = getdis_onpoly(it, p, mdd);
+								if (dd < mdd)
+									mdd = dd;
 							}
-							return dd / cur_radius;
+							return (mdd);
 						}
 					);
 				}
@@ -172,11 +200,11 @@ namespace PIPE_FLOW_FIELD_RENDER
 	// -----------------------------------------------
 	inline void add_centerpoint(crvec p, float r, int line)
 	{
-		r /= mesh_scale;
+		r /= unit_scale;
 		if (r > border_deta)
-			border_deta = r;
+			border_deta = r + 1;
 
-		vec3 tp = p / mesh_scale;
+		vec3 tp = p / unit_scale;
 		updateaabb(point3_t(tp.x, tp.y, tp.z));
 
 		while (line >= centerlinestack.size())
@@ -199,4 +227,21 @@ namespace PIPE_FLOW_FIELD_RENDER
 	{
 		centerlinestack.clear();
 	}
+
+	// -----------------------------------------------
+	#include "artwork/cellflow.hpp"
+	// -----------------------------------------------
+	void test()
+	{
+		setup();
+
+		render_pipe(SUBMESH);
+
+		clear();
+	}
 };
+
+void flow()
+{
+	PIPE_FLOW_FIELD_RENDER::test();
+}
