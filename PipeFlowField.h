@@ -15,7 +15,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 	real cur_radius = 0;
 
 	// -----------------------------------------------
-	inline real field2tris(submesh& sm, int i, int j, int k, real scale, std::function<real(vec3& p)> field)
+	real field2tris(submesh& sm, int i, int j, int k, real scale, std::function<real(vec3& p)> field)
 	{
 		GRIDCELL grid;
 		grid.p[0] = vec3(i, j, k);
@@ -88,7 +88,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 		return grid.val[0];
 	}
 	// -----------------------------------------------
-	inline void updateaabb(const point3_t& p)
+	void updateaabb(const point3_t& p)
 	{
 		if (p.x < aabb.a.x + border_deta)
 			aabb.a.x = p.x - border_deta;
@@ -105,7 +105,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 			aabb.b.z = p.z + border_deta;
 	}
 	// -----------------------------------------------
-	inline real getdis_onpoly(const CENTERLIST& poly, crvec p, real minddis)
+	real getdis_onpoly(const CENTERLIST& poly, crvec p, real minddis)
 	{
 		int currentpoint = -1;
 		real alpha = 0.0f;
@@ -176,7 +176,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 		return minddis;
 	}
 	// -----------------------------------------------
-	inline void _render(submesh& sm)
+	void _render(submesh& sm)
 	{
 		for (int i = aabb.a.x; i < aabb.b.x; i++)
 			for (int j = aabb.a.y; j < aabb.b.y; j++)
@@ -198,7 +198,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 				}
 	}
 	// -----------------------------------------------
-	inline void add_centerpoint(crvec p, float r, int line)
+	void add_centerpoint(crvec p, float r, int line)
 	{
 		r /= unit_scale;
 		if (r > border_deta)
@@ -213,7 +213,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 
 	}
 	// -----------------------------------------------
-	inline void render_pipe(submesh& sm)
+	void render_pipe(submesh& sm)
 	{
 		if (centerlinestack.empty())
 			return;
@@ -223,7 +223,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 		_render(sm);
 	}
 	// -----------------------------------------------
-	inline void clear()
+	void clear()
 	{
 		centerlinestack.clear();
 	}
