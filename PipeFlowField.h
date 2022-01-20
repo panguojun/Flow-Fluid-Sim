@@ -1,10 +1,11 @@
-// ****************************************************************************
-// 管道流体的渲染版本（21-11月优化过）
-// ****************************************************************************
+/*****************************************************************************
+		管道流体的渲染版本（21-11月优化过）
+	构型内核带一个脚本接口，通过脚本来建构形态，另外可以加入UI操作
+*****************************************************************************/
 namespace PIPE_FLOW_FIELD_RENDER
 {
-	const float unit_scale = 1.0f; // 每个方格的尺寸
-	float border_deta = 1;
+	const float unit_scale = 1.0f;  // 每个方格的尺寸
+	float border_deta = 1;		// 边界宽度
 
 	struct center_t{vec3 p;float r;};
 	using CENTERLIST = std::vector<center_t>;
@@ -271,6 +272,9 @@ namespace PIPE_FLOW_FIELD_RENDER
 	{
 		centerlinestack.clear();
 	}
+	
+	// -----------------------------------------------
+	// PHG
 	// -----------------------------------------------
 	static real centerpoint(RealPHG::code& cd, int args)
 	{
@@ -285,18 +289,18 @@ namespace PIPE_FLOW_FIELD_RENDER
 		return 0;
 	}
 	// -----------------------------------------------
-	void reg()
-	{
-		PRINT("reg");
-		RealPHG::register_api("centerpoint", centerpoint);
-		RealPHG::register_api("flow", flow);
-	}
-
-	// -----------------------------------------------
-	void test()
+	static real draw(RealPHG::code& cd, int args)
 	{
 		render_pipe(SUBMESH);
 
 		clear();
 	}
+	// -----------------------------------------------
+	inline void reg()
+	{
+		PRINT("reg");
+		RealPHG::register_api("centerpoint", centerpoint);
+		RealPHG::register_api("draw", draw);
+	}
+	
 };
