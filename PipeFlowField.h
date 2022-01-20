@@ -1,9 +1,9 @@
 // ****************************************************************************
-// 管道流体的渲染版本
+// 管道流体的渲染版本（21-11月优化过）
 // ****************************************************************************
 namespace PIPE_FLOW_FIELD_RENDER
 {
-	float unit_scale = 2.0f;
+	const float unit_scale = 1.0f; // 每个方格的尺寸
 	float border_deta = 1;
 
 	struct center_t{vec3 p;float r;};
@@ -12,10 +12,11 @@ namespace PIPE_FLOW_FIELD_RENDER
 
 	boundingboxi aabb;
 	vec3 cur_center1, cur_center2;
-	real cur_radius = 0;
+	real cur_radius = 1;
+	int cur_side = -1;
 
 	// -----------------------------------------------
-	real field2tris(submesh& sm, int i, int j, int k, real scale, std::function<real(vec3& p)> field)
+	inline real field2tris(submesh& sm, int i, int j, int k, real scale, std::function<real(vec3& p)> field)
 	{
 		GRIDCELL grid;
 		grid.p[0] = vec3(i, j, k);
@@ -27,14 +28,21 @@ namespace PIPE_FLOW_FIELD_RENDER
 		grid.p[6] = vec3(i + 1, j + 1, k + 1);
 		grid.p[7] = vec3(i, j + 1, k + 1);
 
-		grid.val[0] = field(grid.p[0]);
-		grid.val[1] = field(grid.p[1]);
-		grid.val[2] = field(grid.p[2]);
-		grid.val[3] = field(grid.p[3]);
-		grid.val[4] = field(grid.p[4]);
-		grid.val[5] = field(grid.p[5]);
-		grid.val[6] = field(grid.p[6]);
-		grid.val[7] = field(grid.p[7]);
+		grid.val[0] = field(grid.p[0]); if (grid.val[0] < 0) return 0; // 优化！
+		grid.val[1] = field(grid.p[1]); if (grid.val[1] < 0) return 0; // 优化！
+		grid.val[2] = field(grid.p[2]); if (grid.val[2] < 0) return 0; // 优化！
+		grid.val[3] = field(grid.p[3]); if (grid.val[3] < 0) return 0; // 优化！
+		grid.val[4] = field(grid.p[4]); if (grid.val[4] < 0) return 0; // 优化！
+		grid.val[5] = field(grid.p[5]); if (grid.val[5] < 0) return 0; // 优化！
+		grid.val[6] = field(grid.p[6]); if (grid.val[6] < 0) return 0; // 优化！
+		grid.val[7] = field(grid.p[7]); if (grid.val[7] < 0) return 0; // 优化！
+
+
+		/*if (rand() % 10 == 0)
+		{
+			color = 0xFFFF0000;
+			pyramid(grid.p[0], scale * 5);
+		}*/
 
 		TRIANGLE tri[5];
 		int num = Polygonise(grid, 1.0, tri);
@@ -88,7 +96,7 @@ namespace PIPE_FLOW_FIELD_RENDER
 		return grid.val[0];
 	}
 	// -----------------------------------------------
-	void updateaabb(const point3_t& p)
+	inline void updateaabb(const point3_t& p)
 	{
 		if (p.x < aabb.a.x + border_deta)
 			aabb.a.x = p.x - border_deta;
@@ -105,10 +113,9 @@ namespace PIPE_FLOW_FIELD_RENDER
 			aabb.b.z = p.z + border_deta;
 	}
 	// -----------------------------------------------
-	real getdis_onpoly(const CENTERLIST& poly, crvec p, real minddis)
+	inline bool getdis_onpoly(const CENTERLIST& poly, crvec p, real& minddis)
 	{
 		int currentpoint = -1;
-		real alpha = 0.0f;
 
 		if(poly.size() == 1)
 		{
@@ -118,6 +125,8 @@ namespace PIPE_FLOW_FIELD_RENDER
 				currentpoint = 0;
 				minddis = ddis;
 			}
+			if (ddis < 1.0)
+				return true;
 		}
 		else
 		{
@@ -127,57 +136,83 @@ namespace PIPE_FLOW_FIELD_RENDER
 				crvec p2 = poly[i].p;
 				{
 					vec3 v12 = (p2 - p1);
-					real d12 = v12.len();
-					v12 /= d12;
+					real d12 = v12.len(); v12 /= d12;
 					vec3 vp = p - p1;
 					real dot = vp.dot(v12);
-					if (dot > 0 && dot <= d12)
-					{
-						real radius = blend(poly[i - 1].r, poly[i].r, dot / d12);
-						real ddis = (vp - v12 * dot).sqrlen() / (radius * radius);
+					if (dot < 0 && dot > -2)
+					{// 前端
+						real radius = poly[i - 1].r;
+						float ddis = _MAX(dot * dot, vp.sqrlen() - radius * radius);
+
+						ddis = 1 + ddis / (radius * radius);
 						if (ddis < minddis)
 						{
-							alpha = dot / d12;
+							cur_radius = radius;
+							minddis = ddis;
+							cur_side = 1;
+						}
+					}
+					else if (dot > d12 && dot < d12 + 2)
+					{// 后端
+						real radius = poly[i].r;
+						float ddis = (dot - d12);
+						ddis = _MAX(ddis * ddis, (p - p2).sqrlen() - radius * radius);
+
+						ddis = 1 + ddis / (radius * radius);
+						if (ddis < minddis)
+						{
+							cur_radius = radius;
+							minddis = ddis;
+							cur_side = 2;
+						}
+					}
+					else 
+					if(dot >= 0 && dot <= d12)
+					{
+						real alpha = dot / d12;
+						real radius = blend(poly[i - 1].r, poly[i].r, alpha);
+						float ddis = (vp - v12 * dot).sqrlen();
+						
+						float rrad = radius * radius;
+
+						if(dot > 2 && dot < d12 - 2)
+						{// 优化！
+							if ((rrad - ddis) > radius * 4)
+							{
+								minddis = -1;
+								return true; 
+							}
+						}
+						ddis = ddis / rrad;
+						{// 前后边界
+							float dotdeta = _MIN(dot, d12 - dot);
+							dotdeta = 0.95f - dotdeta * dotdeta / rrad;
+
+							ddis = _MAX(ddis, dotdeta);
+						}
+
+						if (ddis < minddis)
+						{// inside the pipe
 							currentpoint = i;
 							cur_center1 = poly[currentpoint - 1].p;
 							cur_center2 = poly[currentpoint].p;
 							cur_radius = radius;
 							minddis = ddis;
+
+							if (ddis < 1.0f)
+								return true;
 						}
-					}
-				}
-				{
-					real radius = poly[i - 1].r;
-					real ddis = (p - p1).sqrlen() / (radius * radius);
-					if (ddis < minddis)
-					{
-						alpha = 0;
-						currentpoint = i - 1;
-						cur_radius = radius;
-						cur_center1 = cur_center2 = poly[currentpoint].p;
-						minddis = ddis;
-					}
-				}
-				{
-					real radius = poly[i].r;
-					real ddis = (p - p2).sqrlen() / (radius * radius);
-					if (ddis < minddis)
-					{
-						alpha = 0;
-						currentpoint = i;
-						cur_radius = radius;
-						cur_center1 = cur_center2 = poly[currentpoint].p;
-						minddis = ddis;
 					}
 				}
 			}
 		}
-
-		return minddis;
+		return false;
 	}
 	// -----------------------------------------------
-	void _render(submesh& sm)
+	inline void _render(submesh& sm)
 	{
+		int tk = GetTickCount();
+		
 		for (int i = aabb.a.x; i < aabb.b.x; i++)
 			for (int j = aabb.a.y; j < aabb.b.y; j++)
 				for (int k = aabb.a.z; k < aabb.b.z; k++)
@@ -185,35 +220,44 @@ namespace PIPE_FLOW_FIELD_RENDER
 					field2tris(sm, i, j, k, unit_scale / 5.0f,
 						[i, j, k](crvec p)->float
 						{
+							cur_side = -1;
 							float mdd = 1e10;
 							for (auto& it : centerlinestack)
 							{
-								float dd = getdis_onpoly(it, p, mdd);
-								if (dd < mdd)
-									mdd = dd;
+								if (getdis_onpoly(it, p, mdd))
+									return mdd;
 							}
-							return (mdd);
+							if (cur_radius > 1.65f &&
+								(mdd -1.0f) * (cur_radius * cur_radius) > cur_radius * 4) return -1;// 优化！
+
+							//if (cur_side > 0)
+							//	return 2;
+							return mdd;
 						}
 					);
 				}
+
+		tk = GetTickCount() - tk;
+		PRINTV(tk);
 	}
 	// -----------------------------------------------
-	void add_centerpoint(crvec p, float r, int line)
+	inline void add_centerpoint(crvec p, float r, int line)
 	{
 		r /= unit_scale;
-		if (r > border_deta)
+		if (r < 1.8f)
+			border_deta = r + 2;
+		else
 			border_deta = r + 1;
 
 		vec3 tp = p / unit_scale;
-		updateaabb(point3_t(tp.x, tp.y, tp.z));
+		updateaabb(point3_t(tp.x + 0.5f, tp.y + 0.5f, tp.z + 0.5f));
 
 		while (line >= centerlinestack.size())
 			centerlinestack.push_back(CENTERLIST());
 		centerlinestack[line].push_back({ tp, r });
-
 	}
 	// -----------------------------------------------
-	void render_pipe(submesh& sm)
+	inline void render_pipe(submesh& sm)
 	{
 		if (centerlinestack.empty())
 			return;
@@ -223,25 +267,36 @@ namespace PIPE_FLOW_FIELD_RENDER
 		_render(sm);
 	}
 	// -----------------------------------------------
-	void clear()
+	inline void clear()
 	{
 		centerlinestack.clear();
 	}
-
 	// -----------------------------------------------
-	#include "artwork/cellflow.hpp"
+	static real centerpoint(RealPHG::code& cd, int args)
+	{
+		real x = PHG_PARAM(1);
+		real y = PHG_PARAM(2);
+		real z = PHG_PARAM(3);
+
+		real r = PHG_PARAM(4);
+		real group = PHG_PARAM(5);
+
+		PIPE_FLOW_FIELD_RENDER::add_centerpoint(vec3(x, y, z), r, group);
+		return 0;
+	}
+	// -----------------------------------------------
+	void reg()
+	{
+		PRINT("reg");
+		RealPHG::register_api("centerpoint", centerpoint);
+		RealPHG::register_api("flow", flow);
+	}
+
 	// -----------------------------------------------
 	void test()
 	{
-		setup();
-
 		render_pipe(SUBMESH);
 
 		clear();
 	}
 };
-
-void flow()
-{
-	PIPE_FLOW_FIELD_RENDER::test();
-}
